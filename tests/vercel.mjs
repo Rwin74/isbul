@@ -33,8 +33,29 @@ assert.equal((await auth.POST(request('login','incorrect-password'))).status,401
 assert.equal((await auth.POST(request('login'))).status,200);
 const who=await auth.GET(new Request('https://example.com/api/auth',{headers:{cookie}}));assert.equal((await who.json()).user,'test@example.com');
 const logout=await auth.DELETE(new Request('https://example.com/api/auth',{method:'DELETE'}));assert.match(logout.headers.get('set-cookie'),/Max-Age=0/);
+const catalog=await import('data:text/javascript;base64,'+Buffer.from(ts.transpile(readFileSync('lib/catalog.ts','utf8'),{module:ts.ModuleKind.ESNext})).toString('base64'));
+globalThis.flowDeps={...server,z,...catalog};
+async function loadRoute(file){const source=readFileSync(file,'utf8').replace(/^import .*;\r?\n/gm,'');return import('data:text/javascript;base64,'+Buffer.from('const {db,identity,failure,unauthorized,validOrigin,cities,sectors,z}=globalThis.flowDeps;'+ts.transpile(source,{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022})).toString('base64'))}
+const postApi=await loadRoute('app/api/posts/route.ts'), applicationApi=await loadRoute('app/api/applications/route.ts');
+const apiRequest=(path,method,body,session=cookie)=>new Request('https://example.com'+path,{method,headers:{cookie:session,origin:'https://example.com','Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});
+const postResponse=await postApi.POST(apiRequest('/api/posts','POST',{kind:'job',title:'Test garson ilanı',name:'Test işletmesi',city:'İstanbul',district:'Kadıköy',sector:'Garsonluk',date:'2026-12-01',hours:'09:00-17:00',pay:1500,description:'İş akışı doğrulama ilanı.'}));assert.equal(postResponse.status,201);const postId=(await postResponse.json()).id;
+const secondSignup=await auth.POST(new Request('https://example.com/api/auth',{method:'POST',headers:{origin:'https://example.com','Content-Type':'application/json'},body:JSON.stringify({mode:'register',email:'worker@example.com',password:'second-password-123'})}));assert.equal(secondSignup.status,200);const workerCookie=secondSignup.headers.get('set-cookie');
+assert.equal((await applicationApi.POST(apiRequest('/api/applications','POST',{postId,name:'Test çalışanı',contact:'test@example.com',message:'Çalışmaya müsaitim.'},workerCookie))).status,201);
+const applicants=await applicationApi.GET(apiRequest('/api/applications?postId='+postId,'GET'));assert.equal((await applicants.json()).applications.length,1);
+assert.equal((await applicationApi.GET(apiRequest('/api/applications?postId='+postId,'GET',null,workerCookie))).status,404);
+assert.equal((await postApi.PATCH(apiRequest('/api/posts','PATCH',{id:postId}))).status,200);
+console.log('Passed: two registered accounts -> signed cookies -> job posting -> application -> owner-only access -> close job.');
+
 for(let i=0;i<7;i++)await auth.POST(request('login','incorrect-password'));
 assert.equal((await auth.POST(request('login'))).status,429);
 globalThis.fetch=async()=>Response.json({results:[{type:'error',error:{message:'failed'}}]});await assert.rejects(server.query('SELECT 1'));
+// Registration must not create an unusable account when signing is not configured.
+const savedSecret=process.env.SESSION_SECRET;
+const before=db.prepare('SELECT COUNT(*) AS count FROM users').get().count;
+delete process.env.SESSION_SECRET;
+assert.equal((await auth.POST(request('register'))).status,503);
+assert.equal(db.prepare('SELECT COUNT(*) AS count FROM users').get().count,before);
+process.env.SESSION_SECRET=savedSecret;
+
 globalThis.fetch=actualFetch;
 console.log('Passed: Turso HTTP mapping, signed session, forged headers/cookies, origin validation, registration, login, logout, throttling and database error handling.');
