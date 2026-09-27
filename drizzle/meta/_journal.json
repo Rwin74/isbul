@@ -8,6 +8,13 @@
       "when": 1790540753131,
       "tag": "0000_last_hammerhead",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1790542247781,
+      "tag": "0001_gray_bruce_banner",
+      "breakpoints": true
     }
   ]
 }
